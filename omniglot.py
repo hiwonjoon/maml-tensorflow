@@ -3,8 +3,8 @@ import tensorflow as tf
 import numpy as np
 from tqdm import tqdm
 
-from model import Maml, _sin_arch, _sin_loss
-from dataset import Sinusoid
+from model import Maml, _omniglot_arch, _xent_loss
+from dataset import Omniglot
 
 import matplotlib
 matplotlib.use('Agg')
@@ -15,7 +15,8 @@ def main(config,
          RANDOM_SEED,
          LOG_DIR,
          TASK_NUM,
-         BATCH_SIZE,
+         N_WAY,
+         K_SHOTS,
          TRAIN_NUM,
          ALPHA,
          LEARNING_RATE, #BETA
@@ -28,9 +29,9 @@ def main(config,
     tf.set_random_seed(RANDOM_SEED)
 
     # >>>>>>> DATASET
-    sin = Sinusoid()
-    _,x,y,x_prime,y_prime= sin.build_queue(TASK_NUM,BATCH_SIZE)
-    _,x_val,y_val,x_prime_val,y_prime_val = sin.build_queue(TASK_NUM,BATCH_SIZE,train=False)
+    omni = Omniglot()
+    _,x,y,x_prime,y_prime= omni.build_queue(TASK_NUM,N_WAY,K_SHOTS)
+    _,x_val,y_val,x_prime_val,y_prime_val = omni.build_queue(TASK_NUM,N_WAY,K_SHOTS,train=False)
     # <<<<<<<
 
     # >>>>>>> MODEL
@@ -42,21 +43,22 @@ def main(config,
 
         with tf.variable_scope('params') as params:
             pass
-        net = Maml(ALPHA,learning_rate,global_step,
-                   x,y,x_prime,y_prime,
-                   _sin_arch,_sin_loss,params)
+        net = Maml(ALPHA,learning_rate,global_step,x,y,x_prime,y_prime,
+                   _omniglot_arch,_xent_loss,params,is_training=True)
 
     with tf.variable_scope('valid'):
         params.reuse_variables()
         valid_net = Maml(ALPHA,0.0,tf.Variable(0,trainable=False),
                          x_val,y_val,x_prime_val,y_prime_val,
-                         _sin_arch,_sin_loss,params)
+                         _omniglot_arch,_xent_loss,params,is_training=False)
 
     with tf.variable_scope('misc'):
+        def _get_acc(logits,labels):
+            return tf.reduce_mean(tf.cast(tf.equal(tf.argmax(logits,axis=-1),labels),tf.float32))
+
         # Summary Operations
         tf.summary.scalar('loss',net.loss)
-        tf.summary.scalar('valid_loss',valid_net.loss),
-
+        tf.summary.scalar('acc',_get_acc(net.logits,y_prime))
         summary_op = tf.summary.merge_all()
 
         # Initialize op
@@ -64,36 +66,10 @@ def main(config,
                         tf.local_variables_initializer())
         config_summary = tf.summary.text('TrainConfig', tf.convert_to_tensor(config.as_matrix()), collections=[])
 
-        # Plot summary
-        def _py_draw_plot(train_x,train_y,x,gt,pred):
-            fig, ax = plt.subplots()
-            ax.plot(np.squeeze(train_x),np.squeeze(train_y), 'ro')
-            ax.plot(np.squeeze(x),np.squeeze(gt),'r')
-            ax.plot(np.squeeze(x),np.squeeze(pred),'b')
-            ax.set_ylim([-5.0,5.0])
-            buf = io.BytesIO()
-            fig.savefig(buf, format='png')
-            buf.seek(0)
-            plt.close(fig)
-            return buf.getvalue()
-
-        def _tf_draw_plots(elems):
-            train_x,train_y,x,gt,pred = elems
-            png_str = tf.py_func(_py_draw_plot,
-                                 [train_x,train_y,x,gt,pred],
-                                 tf.string,
-                                 stateful=False)
-            return tf.image.decode_png(png_str, channels=4)
-
-        plots = tf.map_fn(_tf_draw_plots,[x_val[:10],y_val[:10],
-                                          x_prime_val[:10],y_prime_val[:10],
-                                          valid_net.logits[:10]],dtype=tf.uint8)
-        plots = tf.stack(plots,axis=0)
-        # Expensive Summaries
         extended_summary_op = tf.summary.merge([
-            tf.summary.image('results',plots,max_outputs=10)
+            tf.summary.scalar('valid_loss',valid_net.loss),
+            tf.summary.scalar('valid_acc',_get_acc(valid_net.logits,y_prime_val)),
         ])
-
 
     # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> Run!
     config = tf.ConfigProto()
@@ -136,13 +112,14 @@ def get_default_param():
     from datetime import datetime
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     return {
-        'LOG_DIR':'./log_temp/sinusoid/%s'%(now),
+        'LOG_DIR':'./log/omniglot/%s'%(now),
 
-        'TASK_NUM': 25,
-        'BATCH_SIZE' : 20,
+        'TASK_NUM': 32,
+        'N_WAY' : 5,
+        'K_SHOTS': 1,
 
         'TRAIN_NUM' : 50000, #Size corresponds to one epoch
-        'ALPHA': 0.01,
+        'ALPHA': 0.4,
         'LEARNING_RATE' : 0.001,
         'DECAY_VAL' : 0.5,
         'DECAY_STEPS' : 25000, # Half of the training procedure.
