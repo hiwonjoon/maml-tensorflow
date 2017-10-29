@@ -42,13 +42,13 @@ def main(config,
 
         with tf.variable_scope('params') as params:
             pass
-        net = Maml(ALPHA,learning_rate,global_step,
+        net = Maml(ALPHA,1,learning_rate,global_step,
                    x,y,x_prime,y_prime,
                    _sin_arch,_sin_loss,params)
 
     with tf.variable_scope('valid'):
         params.reuse_variables()
-        valid_net = Maml(ALPHA,0.0,tf.Variable(0,trainable=False),
+        valid_net = Maml(ALPHA,1,0.0,tf.Variable(0,trainable=False),
                          x_val,y_val,x_prime_val,y_prime_val,
                          _sin_arch,_sin_loss,params)
 
@@ -136,7 +136,7 @@ def get_default_param():
     from datetime import datetime
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     return {
-        'LOG_DIR':'./log_temp/sinusoid/%s'%(now),
+        'LOG_DIR':'./log/sinusoid/%s'%(now),
 
         'TASK_NUM': 25,
         'BATCH_SIZE' : 20,

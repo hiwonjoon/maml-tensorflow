@@ -15,7 +15,7 @@ def _sin_loss(logit,y):
     return tf.reduce_mean(tf.reduce_sum((logit - y)**2,axis=1)**0.5) #l2 loss for regression problem.
 
 # Omniglot architecture
-def _omniglot_arch():
+def _omniglot_arch(num_classes):
     net_spec = [Conv2d('conv2d_1',1,64,k_h=3,k_w=3),
                 BatchNorm('conv2d_1',64),
                 lambda t,**kwargs : tf.nn.relu(t),
@@ -29,13 +29,13 @@ def _omniglot_arch():
                 BatchNorm('conv2d_4',64),
                 lambda t,**kwargs : tf.nn.relu(t),
                 lambda t,**kwargs : tf.reduce_mean(t,axis=[2,3]),
-                Linear('linear',64,5)] #5 way classificaiton
+                Linear('linear',64,num_classes)] #N-way classificaiton
     import types
     weights = [block.get_variables() if not isinstance(block,types.FunctionType) else {}
                for block in net_spec]
     return net_spec, weights
 
-def _xent_loss(logits,labels,num_classes=5):
+def _xent_loss(logits,labels,num_classes):
     #Note: sparse version does not have a second derivative..
     #return tf.reduce_mean(
     #    tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits,labels=y))
@@ -44,7 +44,7 @@ def _xent_loss(logits,labels,num_classes=5):
         tf.nn.softmax_cross_entropy_with_logits(logits=logits,labels=one_hots))
 
 class Maml():
-    def __init__(self,alpha,beta,global_step,
+    def __init__(self,alpha,num_sgd,beta,global_step,
                  x,y,x_prime,y_prime,
                  arch_fn,loss_fn,
                  param_scope,is_training=False):
@@ -56,30 +56,35 @@ class Maml():
             # x, y is [Batch,InputDim], [Batch,OutputDim]
             # return grads of weights per task
             with tf.variable_scope(None,'per_task') as current_scope :
-                _t = x
-                for block in net_spec :
-                    _t = block(_t,is_training=False)
-                task_loss = loss_fn(_t,y)
+                logits_per_steps = []
+                task_weights = weights
+                for it in range(num_sgd) :
+                    _t = x
+                    for block,ws in zip(net_spec,task_weights) :
+                        _t = block(_t,is_training=False,**ws)
+                    task_loss = loss_fn(_t,y)
 
-                task_weights = [
-                    {key: w - alpha*tf.gradients(task_loss,[w])[0] for key,w in ws.items()} #maybe, calculating it as a batch might improve performance..
-                    for ws in weights
-                ]
-                _t = x_prime
-                for block,ws in zip(net_spec,task_weights) :
-                    _t = block(_t,is_training=is_training and True,**ws)
-                logits = _t
+                    task_weights = [
+                        {key: w - alpha*tf.gradients(task_loss,[w])[0] for key,w in ws.items()} #maybe, calculating it as a batch might improve performance..
+                        for ws in task_weights
+                    ]
+
+                    _t = x_prime
+                    for block,ws in zip(net_spec,task_weights) :
+                        _t = block(_t,is_training=is_training and it==0,**ws) #update batch norm stats once.
+                    logits_per_steps.append(_t)
 
                 update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS,current_scope.name)
                 #print(update_ops)
                 with tf.control_dependencies(update_ops): #batchnorm assign ops will be updated without order. the moving mean and average will be governed by the latest update, but it seems okay.
                     loss = loss_fn(_t,y_prime)
-            return logits, loss
+            return logits_per_steps[-1], loss, tf.stack(logits_per_steps,axis=-1)
 
         with tf.variable_scope('forward') as forward_scope:
-            logits, loss = tf.map_fn(_per_task,[x,y,x_prime,y_prime],dtype=(tf.float32,tf.float32))
-            self.logits = logits #shape of x_prime
+            logits, loss, logits_per_steps = tf.map_fn(_per_task,[x,y,x_prime,y_prime],dtype=(tf.float32,tf.float32,tf.float32))
+            self.logits = logits
             self.loss = tf.reduce_mean(loss)
+            self.logits_per_steps = logits_per_steps #shape of logits + [NUM_SGD]
 
         with tf.variable_scope('backward'):
             optimizer = tf.train.AdamOptimizer(beta)
@@ -129,8 +134,10 @@ if __name__ == "__main__":
     with tf.variable_scope('params') as params :
         pass
 
-    net = Maml(alpha,beta,global_step,x,y,x_prime,y_prime,
-               _omniglot_arch,_xent_loss,params,is_training=True)
+    from functools import partial
+    net = Maml(alpha,2,beta,global_step,x,y,x_prime,y_prime,
+               partial(_omniglot_arch,num_classes=20),partial(_xent_loss,num_classes=20),
+               params,is_training=True)
 
     init_op = tf.group(tf.global_variables_initializer(),
                     tf.local_variables_initializer())

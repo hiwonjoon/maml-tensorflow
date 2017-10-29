@@ -2,14 +2,11 @@ import better_exceptions
 import tensorflow as tf
 import numpy as np
 from tqdm import tqdm
+from functools import partial
 
 from model import Maml, _omniglot_arch, _xent_loss
 from dataset import Omniglot
 
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
-import io
 
 def main(config,
          RANDOM_SEED,
@@ -19,6 +16,8 @@ def main(config,
          K_SHOTS,
          TRAIN_NUM,
          ALPHA,
+         TRAIN_NUM_SGD, #Inner sgd steps.
+         VALID_NUM_SGD,
          LEARNING_RATE, #BETA
          DECAY_VAL,
          DECAY_STEPS,
@@ -43,14 +42,18 @@ def main(config,
 
         with tf.variable_scope('params') as params:
             pass
-        net = Maml(ALPHA,learning_rate,global_step,x,y,x_prime,y_prime,
-                   _omniglot_arch,_xent_loss,params,is_training=True)
+        net = Maml(ALPHA,TRAIN_NUM_SGD,learning_rate,global_step,x,y,x_prime,y_prime,
+                   partial(_omniglot_arch,num_classes=N_WAY),
+                   partial(_xent_loss,num_classes=N_WAY),
+                   params,is_training=True)
 
     with tf.variable_scope('valid'):
         params.reuse_variables()
-        valid_net = Maml(ALPHA,0.0,tf.Variable(0,trainable=False),
+        valid_net = Maml(ALPHA,VALID_NUM_SGD,0.0,tf.Variable(0,trainable=False),
                          x_val,y_val,x_prime_val,y_prime_val,
-                         _omniglot_arch,_xent_loss,params,is_training=False)
+                         partial(_omniglot_arch,num_classes=N_WAY),
+                         partial(_xent_loss,num_classes=N_WAY),
+                         params,is_training=False)
 
     with tf.variable_scope('misc'):
         def _get_acc(logits,labels):
@@ -59,6 +62,9 @@ def main(config,
         # Summary Operations
         tf.summary.scalar('loss',net.loss)
         tf.summary.scalar('acc',_get_acc(net.logits,y_prime))
+        for it in range(TRAIN_NUM_SGD-1):
+            tf.summary.scalar('acc_it_%d',_get_acc(net.logits_per_steps[:,:,:,it],y_prime))
+
         summary_op = tf.summary.merge_all()
 
         # Initialize op
@@ -68,8 +74,9 @@ def main(config,
 
         extended_summary_op = tf.summary.merge([
             tf.summary.scalar('valid_loss',valid_net.loss),
-            tf.summary.scalar('valid_acc',_get_acc(valid_net.logits,y_prime_val)),
-        ])
+            tf.summary.scalar('valid_acc',_get_acc(valid_net.logits,y_prime_val))] +
+            [ tf.summary.scalar('valid_acc_it_%d',_get_acc(valid_net.logits_per_steps[:,:,:,it],y_prime_val))
+             for it in range(VALID_NUM_SGD-1)])
 
     # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> Run!
     config = tf.ConfigProto()
@@ -118,15 +125,18 @@ def get_default_param():
         'N_WAY' : 5,
         'K_SHOTS': 1,
 
-        'TRAIN_NUM' : 50000, #Size corresponds to one epoch
+        'TRAIN_NUM' : 40000, #Size corresponds to one epoch
         'ALPHA': 0.4,
+        'TRAIN_NUM_SGD' : 1,
+        'VALID_NUM_SGD' : 5,
+
         'LEARNING_RATE' : 0.001,
-        'DECAY_VAL' : 0.5,
-        'DECAY_STEPS' : 25000, # Half of the training procedure.
+        'DECAY_VAL' : 1.0, # Do not decay
+        'DECAY_STEPS' : 20000, # Half of the training procedure.
         'DECAY_STAIRCASE' : False,
 
         'SUMMARY_PERIOD' : 20,
-        'SAVE_PERIOD' : 50000,
+        'SAVE_PERIOD' : 10000,
         'RANDOM_SEED': 0,
     }
 
