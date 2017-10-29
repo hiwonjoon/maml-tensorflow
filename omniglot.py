@@ -63,7 +63,7 @@ def main(config,
         tf.summary.scalar('loss',net.loss)
         tf.summary.scalar('acc',_get_acc(net.logits,y_prime))
         for it in range(TRAIN_NUM_SGD-1):
-            tf.summary.scalar('acc_it_%d',_get_acc(net.logits_per_steps[:,:,:,it],y_prime))
+            tf.summary.scalar('acc_it_%d'%(it),_get_acc(net.logits_per_steps[:,:,:,it],y_prime))
 
         summary_op = tf.summary.merge_all()
 
@@ -75,7 +75,7 @@ def main(config,
         extended_summary_op = tf.summary.merge([
             tf.summary.scalar('valid_loss',valid_net.loss),
             tf.summary.scalar('valid_acc',_get_acc(valid_net.logits,y_prime_val))] +
-            [ tf.summary.scalar('valid_acc_it_%d',_get_acc(valid_net.logits_per_steps[:,:,:,it],y_prime_val))
+            [ tf.summary.scalar('valid_acc_it_%d'%(it),_get_acc(valid_net.logits_per_steps[:,:,:,it],y_prime_val))
              for it in range(VALID_NUM_SGD-1)])
 
     # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> Run!
