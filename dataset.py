@@ -43,82 +43,83 @@ class Omniglot():
     def build_queue(self,task_num,n_way,k_shots,train=True,num_threads=1):
         chars = self.train_chars if train else self.valid_chars
 
-        # Load all images to memory for faster reading.
-        chars_cache_idx = []
-        ims = np.zeros((len(chars)*20,28,28,1),np.float32)
-        cnt = 0
-        for (name,files) in tqdm(chars):
-            idxes = []
-            for fnames in files :
-                resized = Image.open(fnames).resize((28,28),resample=Image.LANCZOS)
-                ims[cnt] = np.expand_dims(np.asarray(resized,np.float32),3)
-                idxes.append(cnt)
-                cnt += 1
-            chars_cache_idx.append((name,idxes))
-        ims = tf.convert_to_tensor(ims)
+        with tf.device('/cpu'):
+            # Load all images to memory for faster reading.
+            chars_cache_idx = []
+            ims = np.zeros((len(chars)*20,28,28,1),np.float32)
+            cnt = 0
+            for (name,files) in tqdm(chars):
+                idxes = []
+                for fnames in files :
+                    resized = Image.open(fnames).resize((28,28),resample=Image.LANCZOS)
+                    ims[cnt] = np.expand_dims(np.asarray(resized,np.float32),3)
+                    idxes.append(cnt)
+                    cnt += 1
+                chars_cache_idx.append((name,idxes))
+            ims = tf.convert_to_tensor(ims)
 
-        def _get_single_task(n_way,k_shots):
-            idxes = np.random.choice( len(chars), n_way, replace=False)
-            rots = np.random.choice( 4, n_way, replace=True )
+            def _get_single_task(n_way,k_shots):
+                idxes = np.random.choice( len(chars), n_way, replace=False)
+                rots = np.random.choice( 4, n_way, replace=True )
 
-            names = [ chars_cache_idx[idx][0] for idx in idxes]
-            files = [ np.random.choice(chars_cache_idx[idx][1],k_shots*2,replace=False)
-                      for idx in idxes ]
-            files = np.stack(files,axis=0)
-            rots = np.tile( rots.reshape(n_way,1),[1,k_shots] )
-            labels = np.tile( np.arange(0,n_way).reshape(n_way,1),[1,k_shots*2] )
+                names = [ chars_cache_idx[idx][0] for idx in idxes]
+                files = [ np.random.choice(chars_cache_idx[idx][1],k_shots*2,replace=False)
+                        for idx in idxes ]
+                files = np.stack(files,axis=0)
+                rots = np.tile( rots.reshape(n_way,1),[1,k_shots] )
+                labels = np.tile( np.arange(0,n_way).reshape(n_way,1),[1,k_shots*2] )
 
-            x,x_prime = np.split(files, 2, axis=1)
-            y,y_prime = np.split(labels,2, axis=1)
+                x,x_prime = np.split(files, 2, axis=1)
+                y,y_prime = np.split(labels,2, axis=1)
 
-            rots = rots.reshape(-1)
-            x = x.reshape(-1)
-            x_prime = x_prime.reshape(-1)
-            y = y.reshape(-1)
-            y_prime = y_prime.reshape(-1)
-            return np.array(names),rots,x,y,x_prime,y_prime
+                rots = rots.reshape(-1)
+                x = x.reshape(-1)
+                x_prime = x_prime.reshape(-1)
+                y = y.reshape(-1)
+                y_prime = y_prime.reshape(-1)
+                return np.array(names),rots,x,y,x_prime,y_prime
 
-        def _read_single_im(elems):
-            f_idx,rot = elems #file index, rotations
-            _t = ims[f_idx]
+            def _read_single_im(elems):
+                f_idx,rot = elems #file index, rotations
+                _t = ims[f_idx]
 
-            def _raise():
-                assert_op = tf.Assert(False,['Undefined Rotation'])
-                with tf.control_dependencies([assert_op]):
-                    return _t
-            _t = tf.case({
-                tf.equal(rot,0): lambda : _t,
-                tf.equal(rot,1): lambda : tf.image.rot90(_t,1),
-                tf.equal(rot,2): lambda : tf.image.rot90(_t,2),
-                tf.equal(rot,3): lambda : tf.image.rot90(_t,3)},
-                default= _raise)
+                def _raise():
+                    assert_op = tf.Assert(False,['Undefined Rotation'])
+                    with tf.control_dependencies([assert_op]):
+                        return _t
+                _t = tf.case({
+                    tf.equal(rot,0): lambda : _t,
+                    tf.equal(rot,1): lambda : tf.image.rot90(_t,1),
+                    tf.equal(rot,2): lambda : tf.image.rot90(_t,2),
+                    tf.equal(rot,3): lambda : tf.image.rot90(_t,3)},
+                    default= _raise)
 
-            #_t = tf.cast(_t,tf.float32) / 255.0 # Omniglot is already [0-1] since images are BW
-            #_t = tf.subtract(_t, 0.5)
-            #_t = tf.multiply(_t, 2.0)
-            return tf.transpose(_t,[2,0,1])
+                #_t = tf.cast(_t,tf.float32) / 255.0 # Omniglot is already [0-1] since images are BW
+                #_t = tf.subtract(_t, 0.5)
+                #_t = tf.multiply(_t, 2.0)
+                return tf.transpose(_t,[2,0,1])
 
-        task,rots,x,y,x_prime,y_prime = tf.py_func(_get_single_task,
-                                                    [n_way,k_shots],
-                                                    [tf.string,tf.int64,tf.int64,tf.int64,tf.int64,tf.int64],
-                                                    stateful=True)
-        task = tf.reshape(task,(n_way,))
-        x = tf.reshape(x,(n_way*k_shots,))
-        y = tf.reshape(y,(n_way*k_shots,))
-        x_prime = tf.reshape(x_prime,(n_way*k_shots,))
-        y_prime = tf.reshape(y_prime,(n_way*k_shots,))
+            task,rots,x,y,x_prime,y_prime = tf.py_func(_get_single_task,
+                                                        [n_way,k_shots],
+                                                        [tf.string,tf.int64,tf.int64,tf.int64,tf.int64,tf.int64],
+                                                        stateful=True)
+            task = tf.reshape(task,(n_way,))
+            x = tf.reshape(x,(n_way*k_shots,))
+            y = tf.reshape(y,(n_way*k_shots,))
+            x_prime = tf.reshape(x_prime,(n_way*k_shots,))
+            y_prime = tf.reshape(y_prime,(n_way*k_shots,))
 
-        x = tf.map_fn(_read_single_im,[x,rots],dtype=tf.float32,back_prop=False,parallel_iterations=1)
-        x_prime = tf.map_fn(_read_single_im,[x_prime,rots],dtype=tf.float32,back_prop=False,parallel_iterations=1)
+            x = tf.map_fn(_read_single_im,[x,rots],dtype=tf.float32,back_prop=False,parallel_iterations=1)
+            x_prime = tf.map_fn(_read_single_im,[x_prime,rots],dtype=tf.float32,back_prop=False,parallel_iterations=1)
 
-        # Build task batch
-        tasks, x, y, x_prime, y_prime = tf.train.batch(
-            [task,x,y,x_prime,y_prime],
-            batch_size=task_num,
-            num_threads=num_threads,
-            capacity=10*task_num)
+            # Build task batch
+            tasks, x, y, x_prime, y_prime = tf.train.batch(
+                [task,x,y,x_prime,y_prime],
+                batch_size=task_num,
+                num_threads=num_threads,
+                capacity=10*task_num)
 
-        return tasks,x,y,x_prime,y_prime
+            return tasks,x,y,x_prime,y_prime
 
 class Sinusoid():
     def __init__(self,
@@ -146,42 +147,43 @@ class Sinusoid():
 
     def build_queue(self,task_num,batch_size,train=True):
         # Actually, this does not build queue since data can generated on the fly.
-        def _gen(task_num,batch_size,train):
-            tasks = []
-            xs,ys = [], []
-            xs_prime, ys_prime = [], []
-            for num in xrange(task_num):
-                amp,phase = self._generate_random_task()
-                x,y = self._generate_random_task_batch(amp,phase,batch_size)
-                if(train):
-                    x_prime,y_prime = self._generate_random_task_batch(amp,phase,batch_size)
-                else:
-                    x_prime,y_prime = self._generate_valid_task_batch(amp,phase,batch_size*20)
-                tasks.append((amp,phase))
-                xs.append(x)
-                ys.append(y)
-                xs_prime.append(x_prime)
-                ys_prime.append(y_prime)
-            return np.array(tasks,np.float32), \
-                   np.array(xs,np.float32), np.array(ys,np.float32), \
-                   np.array(xs_prime,np.float32), np.array(ys_prime,np.float32)
+        with tf.device('/cpu'):
+            def _gen(task_num,batch_size,train):
+                tasks = []
+                xs,ys = [], []
+                xs_prime, ys_prime = [], []
+                for num in xrange(task_num):
+                    amp,phase = self._generate_random_task()
+                    x,y = self._generate_random_task_batch(amp,phase,batch_size)
+                    if(train):
+                        x_prime,y_prime = self._generate_random_task_batch(amp,phase,batch_size)
+                    else:
+                        x_prime,y_prime = self._generate_valid_task_batch(amp,phase,batch_size*20)
+                    tasks.append((amp,phase))
+                    xs.append(x)
+                    ys.append(y)
+                    xs_prime.append(x_prime)
+                    ys_prime.append(y_prime)
+                return np.array(tasks,np.float32), \
+                    np.array(xs,np.float32), np.array(ys,np.float32), \
+                    np.array(xs_prime,np.float32), np.array(ys_prime,np.float32)
 
-        tasks,x,y,x_prime,y_prime = tf.py_func(_gen,
-                                               [task_num,batch_size,train],
-                                               [tf.float32,tf.float32,tf.float32,tf.float32,tf.float32],
-                                               stateful=True)
+            tasks,x,y,x_prime,y_prime = tf.py_func(_gen,
+                                                [task_num,batch_size,train],
+                                                [tf.float32,tf.float32,tf.float32,tf.float32,tf.float32],
+                                                stateful=True)
 
-        tasks = tf.reshape(tasks,[task_num,2])
-        x = tf.reshape(x,[task_num,batch_size,1])
-        y = tf.reshape(y,[task_num,batch_size,1])
-        if( train ):
-            x_prime = tf.reshape(x_prime,[task_num,batch_size,1])
-            y_prime = tf.reshape(y_prime,[task_num,batch_size,1])
-        else :
-            x_prime = tf.reshape(x_prime,[task_num,batch_size*20,1])
-            y_prime = tf.reshape(y_prime,[task_num,batch_size*20,1])
+            tasks = tf.reshape(tasks,[task_num,2])
+            x = tf.reshape(x,[task_num,batch_size,1])
+            y = tf.reshape(y,[task_num,batch_size,1])
+            if( train ):
+                x_prime = tf.reshape(x_prime,[task_num,batch_size,1])
+                y_prime = tf.reshape(y_prime,[task_num,batch_size,1])
+            else :
+                x_prime = tf.reshape(x_prime,[task_num,batch_size*20,1])
+                y_prime = tf.reshape(y_prime,[task_num,batch_size*20,1])
 
-        return tasks,x,y,x_prime,y_prime
+            return tasks,x,y,x_prime,y_prime
 
 if __name__ == "__main__":
     from tqdm import tqdm
@@ -213,6 +215,7 @@ if __name__ == "__main__":
         coord = tf.train.Coordinator()
         threads = tf.train.start_queue_runners(coord=coord,sess=sess)
         for step in tqdm(xrange(100)):
+            #(tasks,x,y,x_prime,y_prime) = sess.run(gen_op)
             (tasks,x,y,x_prime,y_prime), summary_str = sess.run([gen_op,summary_op])
             summary_writer.add_summary(summary_str,step)
     except Exception as e:
