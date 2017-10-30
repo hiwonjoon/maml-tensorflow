@@ -92,7 +92,7 @@ def main(config,
         # Start Queueing
         coord = tf.train.Coordinator()
         threads = tf.train.start_queue_runners(coord=coord,sess=sess)
-        for step in tqdm(xrange(TRAIN_NUM)):
+        for step in tqdm(xrange(TRAIN_NUM),dynamic_ncols=True):
             it,loss,_ = sess.run([global_step,net.loss,net.train_op])
 
             if( it % SAVE_PERIOD == 0 ):
@@ -125,13 +125,13 @@ def get_default_param():
         'N_WAY' : 5,
         'K_SHOTS': 1,
 
-        'TRAIN_NUM' : 40000, #Size corresponds to one epoch
+        'TRAIN_NUM' : 60000, #Size corresponds to one epoch
         'ALPHA': 0.4,
         'TRAIN_NUM_SGD' : 1,
-        'VALID_NUM_SGD' : 5,
+        'VALID_NUM_SGD' : 3,
 
         'LEARNING_RATE' : 0.001,
-        'DECAY_VAL' : 1.0, # Do not decay
+        'DECAY_VAL' : 1.0,
         'DECAY_STEPS' : 20000, # Half of the training procedure.
         'DECAY_STAIRCASE' : False,
 

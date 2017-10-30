@@ -88,7 +88,7 @@ class Maml():
 
         with tf.variable_scope('backward'):
             optimizer = tf.train.AdamOptimizer(beta)
-            grads = optimizer.compute_gradients(loss,var_list=[w for ws in weights for _,w in ws.items()]) #flatten..
+            grads = optimizer.compute_gradients(self.loss)
             self.train_op= optimizer.apply_gradients(grads,global_step=global_step)
 
         save_vars = {('train/'+'/'.join(var.name.split('/')[1:])).split(':')[0] : var for var in

@@ -37,8 +37,8 @@ class Omniglot():
             assert(len(filenames) == 20)
 
         self.chars = chars
-        self.train_chars = chars[:1000]
-        self.valid_chars = chars[1000:]
+        self.train_chars = chars[:1200]
+        self.valid_chars = chars[1200:]
 
     def build_queue(self,task_num,n_way,k_shots,train=True,num_threads=1):
         chars = self.train_chars if train else self.valid_chars

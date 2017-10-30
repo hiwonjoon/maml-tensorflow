@@ -9,7 +9,7 @@ This repository implements the paper, [Model-Agnostic Meta-Leanring for Fast Ada
 - [x] Sinusoid
 
   ![Sinusoide Result](/assets/sinusoid_result.png)
-  Red line - ground truth, Red dots - given observation, Blue line - Predicted after 1 sgd steps
+  Red line - ground truth, Red dots - given observation, Blue line - predicted line after 1 sgd step
 
 - [x] Omniglot
   - [x] Omniglot Testing (multiple descent steps)
