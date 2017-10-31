@@ -77,7 +77,7 @@ class Omniglot():
                 x_prime = x_prime.reshape(-1)
                 y = y.reshape(-1)
                 y_prime = y_prime.reshape(-1)
-                return np.array(names),rots,x,y,x_prime,y_prime
+                return np.array(names,np.string_),rots,x,y,x_prime,y_prime
 
             def _read_single_im(elems):
                 f_idx,rot = elems #file index, rotations
@@ -224,9 +224,9 @@ if __name__ == "__main__":
         coord.request_stop()
         coord.join(threads)
 
-    print tasks
-    #print x
-    print y
-    #print x_prime
-    print y_prime
+    print(tasks)
+    #print(x)
+    print(y)
+    #print(x_prime)
+    print(y_prime)
 

@@ -1,3 +1,4 @@
+from six.moves import xrange
 import better_exceptions
 import tensorflow as tf
 import numpy as np
@@ -28,7 +29,7 @@ def main(config,
     tf.set_random_seed(RANDOM_SEED)
 
     # >>>>>>> DATASET
-    omni = Omniglot()
+    omni = Omniglot(seed=RANDOM_SEED)
     _,x,y,x_prime,y_prime= omni.build_queue(TASK_NUM,N_WAY,K_SHOTS)
     _,x_val,y_val,x_prime_val,y_prime_val = omni.build_queue(TASK_NUM,N_WAY,K_SHOTS,train=False)
     # <<<<<<<
@@ -94,6 +95,7 @@ def main(config,
         threads = tf.train.start_queue_runners(coord=coord,sess=sess)
         for step in tqdm(xrange(TRAIN_NUM),dynamic_ncols=True):
             it,loss,_ = sess.run([global_step,net.loss,net.train_op])
+            tqdm.write('[%5d] Loss: %1.3f'%(it,loss))
 
             if( it % SAVE_PERIOD == 0 ):
                 net.save(sess,LOG_DIR,step=it)
@@ -101,7 +103,6 @@ def main(config,
             if( it % SUMMARY_PERIOD == 0 ):
                 summary = sess.run(summary_op)
                 summary_writer.add_summary(summary,it)
-                tqdm.write('[%5d] Loss: %1.3f'%(it,loss))
 
             if( it % (SUMMARY_PERIOD*10) == 0 ): #Extended Summary
                 summary = sess.run(extended_summary_op)

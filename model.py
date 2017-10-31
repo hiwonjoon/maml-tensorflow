@@ -1,3 +1,4 @@
+from six.moves import xrange
 import tensorflow as tf
 from commons.ops import *
 
@@ -70,14 +71,11 @@ class Maml():
 
                 _t = x_prime
                 for block,ws in zip(net_spec,task_weights) :
-                    _t = block(_t,is_training=(is_training and it==0),**ws) #update batch norm stats once.
+                    _t = block(_t,is_training=False,**ws) #update batch norm stats once.
                 logits_per_steps.append(_t)
 
-            update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS,tf.get_default_graph().get_name_scope())
-            #print(update_ops)
-            with tf.control_dependencies(update_ops):
-                loss = loss_fn(_t,y_prime)
-            return logits_per_steps[-1], loss, tf.stack(logits_per_steps,axis=-1)
+            loss = loss_fn(_t,y_prime)
+            return (logits_per_steps[-1], loss, tf.stack(logits_per_steps,axis=-1))
 
         with tf.variable_scope('forward') as forward_scope:
             logits, loss, logits_per_steps = tf.map_fn(_per_task,[x,y,x_prime,y_prime],dtype=(tf.float32,tf.float32,tf.float32))
@@ -87,8 +85,18 @@ class Maml():
 
         with tf.variable_scope('backward'):
             optimizer = tf.train.AdamOptimizer(beta)
-            grads = optimizer.compute_gradients(self.loss)
-            self.train_op= optimizer.apply_gradients(grads,global_step=global_step)
+
+            # To assign a batchnorm moving mean and avg. Uh... Gross...
+            with tf.variable_scope('bn_assign') as bn:
+                _t = x[0]
+                for block,ws in zip(net_spec,weights) :
+                    _t = block(_t,is_training=True,**ws)
+
+            update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS,bn.name)
+            #print(update_ops)
+            with tf.control_dependencies(update_ops):
+                grads = optimizer.compute_gradients(self.loss)
+                self.train_op= optimizer.apply_gradients(grads,global_step=global_step)
 
         save_vars = {('train/'+'/'.join(var.name.split('/')[1:])).split(':')[0] : var for var in
                      tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES,param_scope.name) }
