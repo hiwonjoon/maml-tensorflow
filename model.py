@@ -55,29 +55,28 @@ class Maml():
             x,y,x_prime,y_prime = elems
             # x, y is [Batch,InputDim], [Batch,OutputDim]
             # return grads of weights per task
-            with tf.variable_scope(None,'per_task') as current_scope :
-                logits_per_steps = []
-                task_weights = weights
-                for it in range(num_sgd) :
-                    _t = x
-                    for block,ws in zip(net_spec,task_weights) :
-                        _t = block(_t,is_training=False,**ws)
-                    task_loss = loss_fn(_t,y)
+            logits_per_steps = []
+            task_weights = weights
+            for it in range(num_sgd) :
+                _t = x
+                for block,ws in zip(net_spec,task_weights) :
+                    _t = block(_t,is_training=False,**ws)
+                task_loss = loss_fn(_t,y)
 
-                    task_weights = [
-                        {key: w - alpha*tf.gradients(task_loss,[w])[0] for key,w in ws.items()} #maybe, calculating it as a batch might improve performance..
-                        for ws in task_weights
-                    ]
+                task_weights = [
+                    {key: w - alpha*tf.gradients(task_loss,[w])[0] for key,w in ws.items()} #maybe, calculating it as a batch might improve performance..
+                    for ws in task_weights
+                ]
 
-                    _t = x_prime
-                    for block,ws in zip(net_spec,task_weights) :
-                        _t = block(_t,is_training=is_training and it==0,**ws) #update batch norm stats once.
-                    logits_per_steps.append(_t)
+                _t = x_prime
+                for block,ws in zip(net_spec,task_weights) :
+                    _t = block(_t,is_training=(is_training and it==0),**ws) #update batch norm stats once.
+                logits_per_steps.append(_t)
 
-                update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS,current_scope.name)
-                #print(update_ops)
-                with tf.control_dependencies(update_ops): #batchnorm assign ops will be updated without order. the moving mean and average will be governed by the latest update, but it seems okay.
-                    loss = loss_fn(_t,y_prime)
+            update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS,tf.get_default_graph().get_name_scope())
+            #print(update_ops)
+            with tf.control_dependencies(update_ops):
+                loss = loss_fn(_t,y_prime)
             return logits_per_steps[-1], loss, tf.stack(logits_per_steps,axis=-1)
 
         with tf.variable_scope('forward') as forward_scope:
