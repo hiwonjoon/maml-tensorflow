@@ -1,3 +1,0 @@
-[submodule "common"]
-	path = commons
-	url = git@github.com:hiwonjoon/tf-boilerplate.git
