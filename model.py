@@ -18,16 +18,16 @@ def _sin_loss(logit,y):
 # Omniglot architecture
 def _omniglot_arch(num_classes):
     net_spec = [Conv2d('conv2d_1',1,64,k_h=3,k_w=3),
-                BatchNorm('conv2d_1',64),
+                BatchNorm('conv2d_1',64,scale=False),
                 lambda t,**kwargs : tf.nn.relu(t),
                 Conv2d('conv2d_2',64,64,k_h=3,k_w=3),
-                BatchNorm('conv2d_2',64),
+                BatchNorm('conv2d_2',64,scale=False),
                 lambda t,**kwargs : tf.nn.relu(t),
                 Conv2d('conv2d_3',64,64,k_h=3,k_w=3),
-                BatchNorm('conv2d_3',64),
+                BatchNorm('conv2d_3',64,scale=False),
                 lambda t,**kwargs : tf.nn.relu(t),
                 Conv2d('conv2d_4',64,64,k_h=3,k_w=3),
-                BatchNorm('conv2d_4',64),
+                BatchNorm('conv2d_4',64,scale=False),
                 lambda t,**kwargs : tf.nn.relu(t),
                 lambda t,**kwargs : tf.reduce_mean(t,axis=[2,3]),
                 Linear('linear',64,num_classes)] #N-way classificaiton
@@ -61,7 +61,7 @@ class Maml():
             for it in range(num_sgd) :
                 _t = x
                 for block,ws in zip(net_spec,task_weights) :
-                    _t = block(_t,is_training=False,**ws)
+                    _t = block(_t,is_training=True,**ws)
                 task_loss = loss_fn(_t,y)
 
                 task_weights = [
@@ -71,7 +71,7 @@ class Maml():
 
                 _t = x_prime
                 for block,ws in zip(net_spec,task_weights) :
-                    _t = block(_t,is_training=False,**ws) #update batch norm stats once.
+                    _t = block(_t,is_training=True,**ws) #update batch norm stats once.
                 logits_per_steps.append(_t)
 
             loss = loss_fn(_t,y_prime)
@@ -83,20 +83,27 @@ class Maml():
             self.loss = tf.reduce_mean(loss)
             self.logits_per_steps = logits_per_steps #shape of logits + [NUM_SGD]
 
+
+        if( is_training == False ):
+            return
+
         with tf.variable_scope('backward'):
             optimizer = tf.train.AdamOptimizer(beta)
+            grads = optimizer.compute_gradients(self.loss)
+            self.train_op= optimizer.apply_gradients(grads,global_step=global_step)
 
-            # To assign a batchnorm moving mean and avg. Uh... Gross...
-            with tf.variable_scope('bn_assign') as bn:
-                _t = x[0]
-                for block,ws in zip(net_spec,weights) :
-                    _t = block(_t,is_training=True,**ws)
-
-            update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS,bn.name)
+            # We will only use on-the-fly statistics for batch norm.
+            #with tf.variable_scope('bn_assign') as bn:
+            #    print(x)
+            #    _t = tf.reshape(x,[-1,1,28,28])
+            #    print(_t)
+            #    for block,ws in zip(net_spec,weights) :
+            #        _t = block(_t,is_training=True,**ws)
+            #update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS,bn.name)
             #print(update_ops)
-            with tf.control_dependencies(update_ops):
-                grads = optimizer.compute_gradients(self.loss)
-                self.train_op= optimizer.apply_gradients(grads,global_step=global_step)
+            #with tf.control_dependencies(update_ops):
+            #    grads = optimizer.compute_gradients(self.loss)
+            #    self.train_op= optimizer.apply_gradients(grads,global_step=global_step)
 
         save_vars = {('train/'+'/'.join(var.name.split('/')[1:])).split(':')[0] : var for var in
                      tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES,param_scope.name) }
