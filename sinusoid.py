@@ -1,3 +1,4 @@
+from six.moves import xrange
 import better_exceptions
 import tensorflow as tf
 import numpy as np
@@ -44,7 +45,7 @@ def main(config,
             pass
         net = Maml(ALPHA,1,learning_rate,global_step,
                    x,y,x_prime,y_prime,
-                   _sin_arch,_sin_loss,params)
+                   _sin_arch,_sin_loss,params,is_training=True)
 
     with tf.variable_scope('valid'):
         params.reuse_variables()
